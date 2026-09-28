@@ -66,3 +66,8 @@ def claude_effort() -> str:
 
 def api_token() -> str:
     return env("API_TOKEN")
+
+
+def lees_token() -> str:
+    """Token dat alleen mag lezen (voor Claude Code-sessies die vragen beantwoorden)."""
+    return env("LEES_TOKEN")

@@ -424,11 +424,12 @@ def bestand(soort: str, naam: str):
 
 # ------------------------------------------------------------------ API voor Claude Code
 
-def _api_check(request: Request):
-    token = config.api_token()
+def _api_check(request: Request, alleen_lezen: bool = False):
+    """API_TOKEN mag alles; LEES_TOKEN alleen de GET-endpoints."""
     kop = request.headers.get("authorization", "")
-    if not token or not hmac.compare_digest(kop, f"Bearer {token}"):
-        raise HTTPException(401, "Ongeldig of ontbrekend API_TOKEN")
+    tokens = [config.api_token()] + ([config.lees_token()] if alleen_lezen else [])
+    if not any(t and hmac.compare_digest(kop, f"Bearer {t}") for t in tokens):
+        raise HTTPException(401, "Ongeldig of ontbrekend token")
 
 
 class NieuweOpdracht(BaseModel):
@@ -455,29 +456,53 @@ def api_nieuwe_opdracht(request: Request, body: NieuweOpdracht):
 
 @app.get("/api/extern/opdrachten")
 def api_opdrachten(request: Request):
-    _api_check(request)
+    _api_check(request, alleen_lezen=True)
     with db.get_db() as conn:
         rows = conn.execute("SELECT id, titel, type, status, updated_at FROM opdrachten ORDER BY id DESC").fetchall()
     return [dict(r) for r in rows]
 
 
 @app.get("/api/extern/opdrachten/{opdracht_id}")
-def api_opdracht(request: Request, opdracht_id: int):
-    _api_check(request)
+def api_opdracht(request: Request, opdracht_id: int, alles: bool = False):
+    """Stand van een opdracht. Met ?alles=1 ook alle berichten (volledige tekst),
+    acties en bijlagen, zodat een Claude Code-sessie er vragen over kan beantwoorden."""
+    _api_check(request, alleen_lezen=True)
     o = _laad_opdracht(opdracht_id)
     with db.get_db() as conn:
         partijen = conn.execute(
-            "SELECT id, naam, status, email, website, offerte_bedrag, offerte_samenvatting, notitie "
-            "FROM partijen WHERE opdracht_id = ?", (opdracht_id,)).fetchall()
+            "SELECT id, naam, status, email, website, telefoon, formulier_url, plaats, offerte_bedrag, "
+            "offerte_samenvatting, notitie FROM partijen WHERE opdracht_id = ?", (opdracht_id,)).fetchall()
         logboek = conn.execute("SELECT created_at, soort, tekst FROM logboek WHERE opdracht_id = ? "
-                               "ORDER BY id DESC LIMIT 15", (opdracht_id,)).fetchall()
+                               "ORDER BY id DESC LIMIT ?", (opdracht_id, 200 if alles else 15)).fetchall()
         open_ = conn.execute("SELECT id, soort, onderwerp, tekst FROM acties WHERE opdracht_id = ? "
                              "AND status IN ('wacht','handmatig')", (opdracht_id,)).fetchall()
+        berichten = conn.execute(
+            "SELECT id, partij_id, richting, soort, van, aan, onderwerp, tekst, automatisch, bijlagen, datum "
+            "FROM berichten WHERE opdracht_id = ? ORDER BY datum, id", (opdracht_id,)).fetchall() if alles else []
+        acties = conn.execute(
+            "SELECT id, partij_id, soort, status, aan, onderwerp, tekst, antwoord, resultaat, created_at, "
+            "uitgevoerd_at FROM acties WHERE opdracht_id = ? ORDER BY id", (opdracht_id,)).fetchall() if alles else []
     uit = {k: o[k] for k in ("id", "titel", "type", "status", "brief", "criteria", "deelbaar", "deadline",
                               "autonomie", "notities", "rapport", "rapport_definitief", "kosten_usd")}
     uit.update({"partijen": [dict(p) for p in partijen], "logboek": [dict(lg) for lg in logboek],
                 "wacht_op_jou": [dict(a) for a in open_]})
+    if alles:
+        uit["berichten"] = []
+        for b in berichten:
+            d = dict(b)
+            d["bijlagen"] = [{**x, "url": f"{config.site_url()}/api/extern/bijlage/{x['bestand']}"}
+                             for x in db.bijlagen(b)]
+            uit["berichten"].append(d)
+        uit["acties"] = [dict(a) for a in acties]
     return uit
+
+
+@app.get("/api/extern/bijlage/{naam}")
+def api_bijlage(request: Request, naam: str):
+    _api_check(request, alleen_lezen=True)
+    if "/" in naam or ".." in naam or not (config.BIJLAGEN_DIR / naam).exists():
+        raise HTTPException(404)
+    return FileResponse(config.BIJLAGEN_DIR / naam, filename=naam.split("_", 1)[-1])
 
 
 @app.post("/api/extern/opdrachten/{opdracht_id}/bericht")
