@@ -1,0 +1,20 @@
+services:
+  opdracht:
+    build: .
+    container_name: opdracht
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "127.0.0.1:8124:8000"
+    # Chromium heeft wat gedeeld geheugen nodig voor formulieren/websites.
+    shm_size: "1gb"
+    networks:
+      - default
+      - deploy_default
+
+networks:
+  default:
+  deploy_default:
+    external: true

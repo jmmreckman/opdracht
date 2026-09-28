@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block titel %}{{ o.titel }} · Opdracht{% endblock %}
+{% block inhoud %}
+<div class="kop-rij">
+  <div>
+    <h1>{{ o.titel }}</h1>
+    <p class="stil">
+      <span class="chip {{ o.status }}">{{ o.status }}</span>
+      {{ o.type }} · {{ AUTONOMIE_LABELS[o.autonomie] }}
+      {% if o.laatste_ronde_at %}· laatste ronde {{ o.laatste_ronde_at|lokaal }}{% endif %}
+      {% if o.volgende_ronde_at %}· volgende {{ o.volgende_ronde_at|lokaal }}{% endif %}
+    </p>
+  </div>
+  <div class="knoppen">
+    {% if o.status == 'concept' %}
+      <form method="post" action="/opdracht/{{ o.id }}/status" class="inline"><input type="hidden" name="status" value="actief"><button class="knop">Start opdracht</button></form>
+    {% elif o.status == 'actief' %}
+      <form method="post" action="/opdracht/{{ o.id }}/ronde" class="inline"><button class="knop" {{ 'disabled' if o.ronde_bezig }}>Ronde nu draaien</button></form>
+      <form method="post" action="/opdracht/{{ o.id }}/status" class="inline"><input type="hidden" name="status" value="gepauzeerd"><button class="knop licht">Pauzeren</button></form>
+    {% elif o.status in ['gepauzeerd', 'afgerond'] %}
+      <form method="post" action="/opdracht/{{ o.id }}/status" class="inline"><input type="hidden" name="status" value="actief"><button class="knop">{{ 'Hervatten' if o.status == 'gepauzeerd' else 'Weer oppakken' }}</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div id="bezig" class="melding bezig {{ '' if o.ronde_bezig else 'verborgen' }}" data-opdracht="{{ o.id }}" data-bezig="{{ 1 if o.ronde_bezig else 0 }}">
+  <span class="spinner"></span> De assistent is aan het werk. Deze pagina ververst vanzelf als hij klaar is.
+</div>
+
+{# ---------------------------------------------------------------- actie nodig #}
+{% if vragen or wacht or handmatig %}
+<section>
+  <h2>Wacht op jou</h2>
+
+  {% for a in vragen %}
+  <div class="kaart vraag">
+    <div class="label">Vraag van de assistent</div>
+    <div class="vraagtekst">{{ a.tekst|md|safe }}</div>
+    <form method="post" action="/actie/{{ a.id }}/beantwoorden">
+      <textarea name="antwoord" rows="2" required placeholder="Je antwoord…"></textarea>
+      <button class="knop">Antwoorden</button>
+    </form>
+  </div>
+  {% endfor %}
+
+  {% if wacht|length > 1 %}
+  <form method="post" action="/actie/goedkeuren-alles/{{ o.id }}" class="rechts" onsubmit="return confirm('Alle {{ wacht|length }} berichten goedkeuren zoals ze er nu staan?')">
+    <button class="knop licht klein">Alle {{ wacht|length }} goedkeuren</button>
+  </form>
+  {% endif %}
+
+  {% for a in wacht %}
+  <div class="kaart concept">
+    {% if a.soort == 'mail' %}
+    <div class="label">Mail aan {{ a.partij_naam }} &lt;{{ a.aan }}&gt;</div>
+    <form method="post" action="/actie/{{ a.id }}/goedkeuren">
+      <input name="onderwerp" value="{{ a.onderwerp }}">
+      <textarea name="tekst" rows="{{ [a.tekst.count('\n') + 3, 18]|min }}">{{ a.tekst }}</textarea>
+      <div class="knoppen">
+        <button class="knop">Goedkeuren en versturen</button>
+        <button type="button" class="knop licht" onclick="toonAfwijzen({{ a.id }})">Afwijzen</button>
+      </div>
+    </form>
+    {% else %}
+    <div class="label">Formulier van {{ a.partij_naam }} · <a href="{{ a.aan }}" target="_blank" rel="noopener">{{ a.aan }}</a></div>
+    <p>{{ a.onderwerp }}</p>
+    <pre class="mailtekst">{{ a.tekst }}</pre>
+    <form method="post" action="/actie/{{ a.id }}/goedkeuren" class="knoppen">
+      <button class="knop">Goedkeuren en versturen</button>
+      <button type="button" class="knop licht" onclick="toonAfwijzen({{ a.id }})">Afwijzen</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/actie/{{ a.id }}/afwijzen" id="afwijzen-{{ a.id }}" class="verborgen afwijzen">
+      <input name="reden" placeholder="Waarom? (de assistent leert hiervan; mag leeg)">
+      <button class="knop licht klein">Afwijzen</button>
+    </form>
+  </div>
+  {% endfor %}
+
+  {% for a in handmatig %}
+  <div class="kaart {{ a.status }}">
+    <div class="label">{{ a.soort|capitalize }} {{ 'moet handmatig' if a.status == 'handmatig' else 'mislukt' }} · {{ a.partij_naam or a.aan }}</div>
+    {% if a.resultaat %}<p class="fout">{{ a.resultaat }}</p>{% endif %}
+    {% if a.soort == 'formulier' %}<p><a href="{{ a.aan }}" target="_blank" rel="noopener">Formulier openen</a></p>{% endif %}
+    <details><summary>Inhoud</summary><pre class="mailtekst">{{ a.tekst }}</pre></details>
+    {% if a.screenshot %}<p><a href="/bestand/screenshot/{{ a.screenshot }}" target="_blank">Schermafbeelding</a></p>{% endif %}
+    <div class="knoppen">
+      {% if a.soort == 'formulier' %}<form method="post" action="/actie/{{ a.id }}/zelf-verstuurd" class="inline"><button class="knop">Zelf verstuurd</button></form>{% endif %}
+      <form method="post" action="/actie/{{ a.id }}/opnieuw" class="inline"><button class="knop licht">Opnieuw proberen</button></form>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if wachtrij %}
+<p class="melding">{{ wachtrij|length }} goedgekeurd bericht(en) in de wachtrij.
+  {% if verzendvenster %}Ze gaan de komende minuten één voor één de deur uit.{% else %}Ze worden verstuurd zodra het weer kantoortijd is.{% endif %}
+</p>
+{% endif %}
+
+<section>
+  <form method="post" action="/opdracht/{{ o.id }}/bericht" class="kaart bericht-form">
+    <label>Bericht aan de assistent
+      <textarea name="tekst" rows="2" placeholder="Bijv.: Offerte X is te duur, focus op partijen die in week 45 kunnen." required></textarea>
+    </label>
+    <button class="knop">Sturen</button>
+  </form>
+</section>
+
+{% if o.rapport %}
+<section>
+  <h2>{{ 'Eindrapport' if o.rapport_definitief else 'Tussenstand' }}</h2>
+  <div class="kaart rapport">{{ o.rapport|md|safe }}</div>
+</section>
+{% endif %}
+
+{% if o.type == 'uitbesteden' or partijen %}
+<section>
+  <h2>Partijen <span class="stil">({{ partijen|length }})</span></h2>
+  {% if not partijen %}<p class="stil">Nog geen partijen gevonden{% if o.status == 'actief' %}; de eerste ronde zoekt ze op{% endif %}.</p>{% endif %}
+  <div class="tabel-wrap">
+  <table class="tabel">
+    <thead><tr><th>Partij</th><th>Status</th><th>Offerte</th><th>Contact</th><th></th></tr></thead>
+    <tbody>
+    {% for p in partijen %}
+      <tr class="p-{{ p.status }}">
+        <td><a href="/opdracht/{{ o.id }}/partij/{{ p.id }}"><strong>{{ p.naam }}</strong></a>
+          {% if p.plaats %}<br><span class="stil">{{ p.plaats }}</span>{% endif %}</td>
+        <td><span class="chip p {{ p.status }}">{{ p.status|replace('_', ' ') }}</span></td>
+        <td>{{ p.offerte_bedrag or '–' }}</td>
+        <td class="stil klein-tekst">{{ p.email or ('formulier' if p.formulier_url else '–') }}{% if p.laatste %}<br>laatst {{ p.laatste|lokaal }}{% endif %}</td>
+        <td>{% if p.website %}<a href="{{ p.website if p.website.startswith('http') else 'https://' ~ p.website }}" target="_blank" rel="noopener">site</a>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section>
+  <h2>Tijdlijn</h2>
+  {% if not berichten %}<p class="stil">Nog geen berichten.</p>{% endif %}
+  {% for b in berichten %}
+  <details class="bericht {{ b.richting }} {{ b.soort }}">
+    <summary>
+      <span class="pijl">{{ '→' if b.richting == 'uit' else '←' }}</span>
+      <strong>{% if b.soort == 'opdrachtgever' %}Jij{% else %}{{ b.partij_naam or b.van or b.aan }}{% endif %}</strong>
+      · {{ b.onderwerp or (b.tekst[:60] ~ '…') }}
+      {% if bijlagen(b) %}📎{% endif %}
+      <span class="stil">{{ b.datum|lokaal }}</span>
+    </summary>
+    <pre class="mailtekst">{{ b.tekst }}</pre>
+    {% for x in bijlagen(b) %}<a class="bijlage" href="/bestand/bijlage/{{ x.bestand }}" target="_blank">📎 {{ x.naam }}</a>{% endfor %}
+  </details>
+  {% endfor %}
+</section>
+
+<section>
+  <h2>Logboek</h2>
+  <ul class="logboek">
+  {% for lg in logboek %}
+    <li class="{{ lg.soort }}"><span class="stil">{{ lg.created_at|lokaal }}</span> {{ lg.tekst|md|safe }}</li>
+  {% else %}
+    <li class="stil">Nog niets gebeurd.</li>
+  {% endfor %}
+  </ul>
+</section>
+
+<section>
+  <details class="kaart">
+    <summary><strong>Opdracht bekijken of aanpassen</strong></summary>
+    <form method="post" action="/opdracht/{{ o.id }}/bewerken">
+      <label>Titel <input name="titel" value="{{ o.titel }}" required></label>
+      <div class="twee">
+        <label>Soort
+          <select name="type">{% for t in ['uitbesteden','onderzoek'] %}<option {{ 'selected' if o.type == t }}>{{ t }}</option>{% endfor %}</select>
+        </label>
+        <label>Zelfstandigheid
+          <select name="autonomie">{% for k, v in AUTONOMIE_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if o.autonomie == k }}>{{ v }}</option>{% endfor %}</select>
+        </label>
+      </div>
+      <label>Omschrijving <textarea name="brief" rows="8">{{ o.brief }}</textarea></label>
+      <label>Harde eisen en wensen <textarea name="criteria" rows="4">{{ o.criteria }}</textarea></label>
+      <label>Planning / deadline <input name="deadline" value="{{ o.deadline }}"></label>
+      <label>Mag gedeeld worden <textarea name="deelbaar" rows="2">{{ o.deelbaar }}</textarea></label>
+      <button class="knop">Opslaan</button>
+    </form>
+    {% if o.notities %}
+    <h3>Werkgeheugen van de assistent</h3>
+    <div class="notities">{{ o.notities|md|safe }}</div>
+    {% endif %}
+    <p class="stil">Kosten tot nu toe: ongeveer ${{ '%.2f'|format(o.kosten_usd) }} ({{ o.zoekopdrachten }} zoekopdrachten, {{ (o.tokens_in / 1000)|round|int }}k tokens in, {{ (o.tokens_uit / 1000)|round|int }}k uit)</p>
+    <div class="knoppen">
+      {% if o.status != 'afgerond' %}<form method="post" action="/opdracht/{{ o.id }}/status" class="inline"><input type="hidden" name="status" value="afgerond"><button class="knop licht klein">Markeer als afgerond</button></form>{% endif %}
+      <form method="post" action="/opdracht/{{ o.id }}/verwijderen" class="inline" onsubmit="this.bevestig.value = prompt('Typ VERWIJDER om deze opdracht en alle berichten te wissen') || ''; return !!this.bevestig.value;">
+        <input type="hidden" name="bevestig"><button class="knop gevaar klein">Verwijderen</button>
+      </form>
+    </div>
+  </details>
+</section>
+{% endblock %}
+{% block scripts %}<script>initOpdracht();</script>{% endblock %}

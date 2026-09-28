@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block titel %}{{ p.naam }} · {{ o.titel }}{% endblock %}
+{% block inhoud %}
+<p><a href="/opdracht/{{ o.id }}">← {{ o.titel }}</a></p>
+<div class="kop-rij">
+  <h1>{{ p.naam }}</h1>
+  <form method="post" action="/opdracht/{{ o.id }}/partij/{{ p.id }}/status" class="inline">
+    <select name="status" onchange="this.form.submit()">
+      {% for s in ['gevonden','benaderd','in_gesprek','offerte_ontvangen','geen_reactie','afgevallen','favoriet'] %}
+      <option value="{{ s }}" {{ 'selected' if p.status == s }}>{{ s|replace('_', ' ') }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+<div class="kaart">
+  <dl class="gegevens">
+    {% if p.website %}<dt>Website</dt><dd><a href="{{ p.website if p.website.startswith('http') else 'https://' ~ p.website }}" target="_blank" rel="noopener">{{ p.website }}</a></dd>{% endif %}
+    {% if p.email %}<dt>Mail</dt><dd>{{ p.email }}</dd>{% endif %}
+    {% if p.telefoon %}<dt>Telefoon</dt><dd>{{ p.telefoon }}</dd>{% endif %}
+    {% if p.formulier_url %}<dt>Formulier</dt><dd><a href="{{ p.formulier_url }}" target="_blank" rel="noopener">openen</a></dd>{% endif %}
+    {% if p.plaats %}<dt>Plaats</dt><dd>{{ p.plaats }}</dd>{% endif %}
+    {% if p.offerte_bedrag %}<dt>Offerte</dt><dd><strong>{{ p.offerte_bedrag }}</strong></dd>{% endif %}
+  </dl>
+  {% if p.offerte_samenvatting %}<p>{{ p.offerte_samenvatting }}</p>{% endif %}
+  {% if p.notitie %}<p class="stil">{{ p.notitie }}</p>{% endif %}
+</div>
+
+<h2>Gesprek</h2>
+{% for b in berichten %}
+<div class="kaart bericht-volledig {{ b.richting }}">
+  <div class="label">{{ 'Verstuurd' if b.richting == 'uit' else 'Ontvangen' }}{{ ' (formulier)' if b.soort == 'formulier' }} · {{ b.datum|lokaal }}{{ ' · automatisch antwoord' if b.automatisch }}</div>
+  <strong>{{ b.onderwerp }}</strong>
+  <pre class="mailtekst">{{ b.tekst }}</pre>
+  {% for x in bijlagen(b) %}<a class="bijlage" href="/bestand/bijlage/{{ x.bestand }}" target="_blank">📎 {{ x.naam }}</a>{% endfor %}
+</div>
+{% else %}
+<p class="stil">Nog geen contact.</p>
+{% endfor %}
+
+{% for a in acties %}
+<div class="kaart {{ a.status }}">
+  <div class="label">{{ a.soort }} · {{ a.status }}</div>
+  <strong>{{ a.onderwerp }}</strong>
+  <pre class="mailtekst">{{ a.tekst }}</pre>
+  {% if a.resultaat %}<p class="stil">{{ a.resultaat }}</p>{% endif %}
+</div>
+{% endfor %}
+{% endblock %}

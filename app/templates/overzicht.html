@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block inhoud %}
+{% if not mail_ok or not imap_ok %}
+<div class="melding waarschuwing">
+  Mail is nog niet volledig ingesteld
+  ({% if not mail_ok %}SMTP ontbreekt{% endif %}{% if not mail_ok and not imap_ok %}, {% endif %}{% if not imap_ok %}IMAP ontbreekt{% endif %}).
+  Zie de README: vul <code>.env</code> op de server aan.
+</div>
+{% endif %}
+{% for w in waarschuwingen %}
+<div class="melding waarschuwing">{{ w.tekst }} <span class="stil">{{ w.created_at|lokaal }}</span></div>
+{% endfor %}
+
+<div class="kop-rij">
+  <h1>Opdrachten</h1>
+  <span class="stil">Mail gecontroleerd: {{ imap_laatst|lokaal or "nog niet" }}</span>
+</div>
+
+{% if not opdrachten %}
+<div class="kaart leeg">
+  <p>Nog geen opdrachten.</p>
+  <a class="knop" href="/nieuw">Eerste opdracht maken</a>
+</div>
+{% endif %}
+
+<div class="raster">
+{% for o in opdrachten %}
+  <a class="kaart opdracht-kaart status-{{ o.status }}" href="/opdracht/{{ o.id }}">
+    <div class="kaart-kop">
+      <span class="chip {{ o.status }}">{{ o.status }}</span>
+      {% if o.actie_nodig %}<span class="chip actie">{{ o.actie_nodig }} wacht op jou</span>{% endif %}
+      {% if o.ronde_bezig %}<span class="chip bezig">bezig…</span>{% endif %}
+    </div>
+    <h2>{{ o.titel }}</h2>
+    <p class="stil">
+      {{ o.type }} ·
+      {% if o.type == 'uitbesteden' %}{{ o.n_partijen }} partijen · {{ o.n_offertes }} offertes ·{% endif %}
+      bijgewerkt {{ o.updated_at|lokaal }}
+    </p>
+  </a>
+{% endfor %}
+</div>
+
+{% if los %}
+<h2>Mail die nergens bij hoort</h2>
+<p class="stil">De assistent kon deze mails niet aan een opdracht koppelen.</p>
+{% for b in los %}
+<div class="kaart">
+  <details>
+    <summary><strong>{{ b.onderwerp or "(geen onderwerp)" }}</strong> · {{ b.van }} · <span class="stil">{{ b.datum|lokaal }}</span></summary>
+    <pre class="mailtekst">{{ b.tekst[:3000] }}</pre>
+  </details>
+  <div class="knoppen">
+    {% if alle_opdrachten %}
+    <form method="post" action="/bericht/{{ b.id }}/koppel" class="inline">
+      <select name="opdracht_id">
+        {% for o in alle_opdrachten %}<option value="{{ o.id }}">{{ o.titel }}</option>{% endfor %}
+      </select>
+      <button class="knop klein">Koppelen</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/bericht/{{ b.id }}/negeer" class="inline">
+      <button class="knop klein licht">Negeren</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

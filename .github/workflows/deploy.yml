@@ -1,0 +1,57 @@
+name: Tests en deploy naar VPS
+
+on:
+  push:
+    branches:
+      - main
+      - claude/opdracht-steenhub-platform-kam5l2
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests
+        run: |
+          pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+          python -m pytest -q
+
+      - name: Deploy via SSH
+        env:
+          HEEFT_SLEUTEL: ${{ secrets.DEPLOY_SSH_KEY != '' }}
+        if: env.HEEFT_SLEUTEL == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" | tr -d ' \t\r\n' | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "BRANCH='${{ github.ref_name }}' TOKEN='${{ github.token }}' bash -s" <<'SCRIPT'
+          set -euo pipefail
+          DIR=/opt/opdracht
+          REPO="https://x-access-token:${TOKEN}@github.com/jmmreckman/opdracht.git"
+          mkdir -p "$DIR" && cd "$DIR"
+          [ -d .git ] || git init -q
+          # Kortlevend token alleen voor deze fetch; komt niet in de git-config.
+          git fetch -q "$REPO" "$BRANCH"
+          git reset -q --hard FETCH_HEAD
+          if [ ! -f .env ]; then
+            cp .env.example .env
+            echo "::error::/opt/opdracht/.env is aangemaakt uit het voorbeeld. Vul hem in (zie README) en draai de deploy opnieuw."
+            exit 1
+          fi
+          mkdir -p data
+          docker compose up -d --build
+          CADDY=/opt/kamerverhuur-scanner/deploy/Caddyfile
+          if [ -f "$CADDY" ] && ! grep -q "opdracht.steenhub.nl" "$CADDY"; then
+            printf '\nopdracht.steenhub.nl {\n    reverse_proxy opdracht:8000\n}\n' >> "$CADDY"
+            docker exec deploy-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+          fi
+          sleep 8
+          curl -fsS http://127.0.0.1:8124/health
+          SCRIPT

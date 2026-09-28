@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inloggen · Opdracht</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body class="login">
+  <form method="post" action="/login" class="kaart login-kaart">
+    <h1>Opdracht</h1>
+    {% if fout %}<p class="fout">Wachtwoord klopt niet.</p>{% endif %}
+    <label>Wachtwoord <input type="password" name="wachtwoord" autofocus required></label>
+    <button class="knop">Inloggen</button>
+  </form>
+</body>
+</html>

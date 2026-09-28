@@ -1,0 +1,8 @@
+# Toe te voegen aan het gedeelde Caddyfile (/opt/kamerverhuur-scanner/deploy/Caddyfile),
+# naast de blokken voor steenhub.nl / kansen / gewicht / rommel.
+# "opdracht" is de servicenaam uit docker-compose.yml; werkt omdat de container
+# op hetzelfde Docker-netwerk (deploy_default) zit als Caddy.
+
+opdracht.steenhub.nl {
+    reverse_proxy opdracht:8000
+}

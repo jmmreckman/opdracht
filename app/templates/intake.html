@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block titel %}Nieuwe opdracht · Opdracht{% endblock %}
+{% block inhoud %}
+<h1>Nieuwe opdracht</h1>
+<p class="stil">Vertel wat je wilt laten doen. Ik stel vragen tot het helder is en zet dan een voorstel klaar dat je met één klik start.</p>
+
+<div id="chat" class="chat" data-intake="{{ it.id }}">
+  {% for m in it.weergave %}
+  <div class="bubbel {{ 'jij' if m.rol == 'jij' else 'ai' }}">{{ m.tekst }}</div>
+  {% endfor %}
+</div>
+
+<form id="chat-form" class="chat-invoer">
+  <textarea id="chat-tekst" rows="3" placeholder="Bijv.: Ik zoek een partij in Rotterdam die een prefab dakkapel van 2,5 m plaatst, in 1 dag, over 5 tot 8 weken…" required></textarea>
+  <button class="knop" id="chat-knop">Versturen</button>
+</form>
+
+<form id="voorstel" class="kaart voorstel {{ '' if it.voorstel else 'verborgen' }}" method="post" action="/intake/{{ it.id }}/start">
+  <h2>Voorstel</h2>
+  <p class="stil">Pas aan wat je wilt en start de opdracht.</p>
+  <label>Titel <input name="titel" value="{{ it.voorstel.titel if it.voorstel else '' }}" required></label>
+  <div class="twee">
+    <label>Soort
+      <select name="type">
+        {% for t in ['uitbesteden','onderzoek'] %}<option value="{{ t }}" {{ 'selected' if it.voorstel and it.voorstel.type == t }}>{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Zelfstandigheid
+      <select name="autonomie">
+        {% for k, v in AUTONOMIE_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if it.voorstel and it.voorstel.autonomie == k }}>{{ v }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+  <label>Omschrijving <textarea name="brief" rows="8">{{ it.voorstel.brief if it.voorstel else '' }}</textarea></label>
+  <label>Harde eisen en wensen <textarea name="criteria" rows="4">{{ it.voorstel.criteria if it.voorstel else '' }}</textarea></label>
+  <label>Planning / deadline <input name="deadline" value="{{ it.voorstel.deadline if it.voorstel else '' }}"></label>
+  <label>Mag gedeeld worden met bedrijven <textarea name="deelbaar" rows="2">{{ it.voorstel.deelbaar if it.voorstel else '' }}</textarea></label>
+  <button class="knop groot">Start opdracht</button>
+</form>
+{% endblock %}
+{% block scripts %}<script>initIntake();</script>{% endblock %}

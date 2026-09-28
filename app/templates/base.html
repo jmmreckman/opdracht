@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titel %}Opdracht{% endblock %}</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">Opdracht</a>
+    <nav>
+      <a href="/">Overzicht</a>
+      <a class="knop klein" href="/nieuw">+ Nieuwe opdracht</a>
+    </nav>
+  </header>
+  <main>
+    {% block inhoud %}{% endblock %}
+  </main>
+  <script src="/assets/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
