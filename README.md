@@ -39,6 +39,14 @@ tot €1000") kan hij ook, maar daarvoor is de Claude-app zelf meestal net zo ha
 
 ## Installatie op de VPS
 
+Snelste weg: log in op de VPS en draai
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/jmmreckman/opdracht/claude/opdracht-steenhub-platform-kam5l2/install.sh)
+```
+Dat haalt de code op, vraagt vier instellingen, start alles, voegt het Caddy-blok toe en
+controleert Claude, SMTP en IMAP (met een testmail). Nog een keer draaien = bijwerken.
+Hieronder dezelfde stappen met de hand.
+
 Zelfde opzet als rommel.steenhub.nl: Docker, en Caddy regelt HTTPS.
 
 ### 1. DNS
