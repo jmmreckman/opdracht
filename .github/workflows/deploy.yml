@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/opdracht-steenhub-platform-kam5l2
   workflow_dispatch:
 
 # Nooit twee deploys tegelijk op de server.
