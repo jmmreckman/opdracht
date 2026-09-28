@@ -7,6 +7,11 @@ on:
       - claude/opdracht-steenhub-platform-kam5l2
   workflow_dispatch:
 
+# Nooit twee deploys tegelijk op de server.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

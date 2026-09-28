@@ -70,3 +70,13 @@ def test_lees_token_mag_alleen_lezen(monkeypatch, tmp_path):
     assert c.get(url.replace("http://testserver", ""), headers=lees).content == b"%PDF-1.4"
     assert c.post(f"/api/extern/opdrachten/{oid}/bericht", headers=lees, json={"tekst": "x"}).status_code == 401
     assert c.post("/api/extern/opdrachten", headers=lees, json={"titel": "x", "brief": "y"}).status_code == 401
+
+
+def test_logs_endpoint(monkeypatch):
+    import logging
+    monkeypatch.setenv("LEES_TOKEN", "lezen")
+    logging.getLogger("opdracht").warning("testregel voor logs")
+    c = TestClient(main.app)
+    assert c.get("/api/extern/logs").status_code == 401
+    data = c.get("/api/extern/logs", headers={"Authorization": "Bearer lezen"}).json()
+    assert any("testregel voor logs" in r for r in data["log"])

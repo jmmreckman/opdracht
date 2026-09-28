@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Installeert of werkt opdracht.steenhub.nl bij op de VPS. Gebruik:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/jmmreckman/opdracht/claude/opdracht-steenhub-platform-kam5l2/install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/jmmreckman/opdracht/main/install.sh)
 # Nog een keer draaien = bijwerken (je instellingen blijven bewaard).
 # Met "opnieuw" als argument vraagt hij de instellingen opnieuw.
 set -euo pipefail
 
-BRANCH="claude/opdracht-steenhub-platform-kam5l2"
+BRANCH="main"
 REPO="https://github.com/jmmreckman/opdracht.git"
 DIR=/opt/opdracht
 CADDYFILE=/opt/kamerverhuur-scanner/deploy/Caddyfile

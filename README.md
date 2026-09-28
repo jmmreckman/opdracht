@@ -41,7 +41,7 @@ tot €1000") kan hij ook, maar daarvoor is de Claude-app zelf meestal net zo ha
 
 Snelste weg: log in op de VPS en draai
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/jmmreckman/opdracht/claude/opdracht-steenhub-platform-kam5l2/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/jmmreckman/opdracht/main/install.sh)
 ```
 Dat haalt de code op, vraagt vier instellingen, start alles, voegt het Caddy-blok toe en
 controleert Claude, SMTP en IMAP (met een testmail). Nog een keer draaien = bijwerken.
@@ -67,7 +67,7 @@ een paar weken. De site laat per opdracht een kosteninschatting zien.
 ### 4. Code en instellingen
 ```bash
 sudo mkdir -p /opt/opdracht && sudo chown $USER /opt/opdracht
-git clone -b claude/opdracht-steenhub-platform-kam5l2 https://github.com/jmmreckman/opdracht.git /opt/opdracht
+git clone -b main https://github.com/jmmreckman/opdracht.git /opt/opdracht
 cd /opt/opdracht
 cp .env.example .env
 nano .env        # vul in: SITE_PASSWORD, API_TOKEN, ANTHROPIC_API_KEY, SMTP_PASSWORD, AFZENDER_NAAM

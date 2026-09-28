@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import re
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -17,6 +18,26 @@ from pydantic import BaseModel
 from . import config, db, inbox, intake, scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+
+class _LogBuffer(logging.Handler):
+    """Laatste regels van het applicatielog in het geheugen, zodat een Claude
+    Code-sessie via de API kan zien wat de app doet (zonder SSH)."""
+
+    def __init__(self, max_regels: int = 1000):
+        super().__init__()
+        self.regels = deque(maxlen=max_regels)
+        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+    def emit(self, record):
+        try:
+            self.regels.append(self.format(record))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+LOG_BUFFER = _LogBuffer()
+logging.getLogger().addHandler(LOG_BUFFER)
 logger = logging.getLogger("opdracht")
 
 @asynccontextmanager
@@ -495,6 +516,18 @@ def api_opdracht(request: Request, opdracht_id: int, alles: bool = False):
             uit["berichten"].append(d)
         uit["acties"] = [dict(a) for a in acties]
     return uit
+
+
+@app.get("/api/extern/logs")
+def api_logs(request: Request, regels: int = 200):
+    """Laatste regels van het applicatielog (fouten, verstuurde mails, rondes)."""
+    _api_check(request, alleen_lezen=True)
+    with db.get_db() as conn:
+        logboek = conn.execute("SELECT created_at, opdracht_id, soort, tekst FROM logboek "
+                               "ORDER BY id DESC LIMIT 50").fetchall()
+    return {"log": list(LOG_BUFFER.regels)[-max(1, min(regels, 1000)):],
+            "logboek": [dict(r) for r in logboek],
+            "imap_laatst": db.kv_get("imap_laatst")}
 
 
 @app.get("/api/extern/bijlage/{naam}")
