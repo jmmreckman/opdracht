@@ -56,6 +56,7 @@
     <form method="post" action="/actie/{{ a.id }}/goedkeuren">
       <input name="onderwerp" value="{{ a.onderwerp }}">
       <textarea name="tekst" rows="{{ [a.tekst.count('\n') + 3, 18]|min }}">{{ a.tekst }}</textarea>
+      {% for x in bijlagen(a) %}<a class="bijlage" href="/bestand/bijlage/{{ x.bestand }}" target="_blank">📎 {{ x.naam }}</a>{% endfor %}
       <div class="knoppen">
         <button class="knop">Goedkeuren en versturen</button>
         <button type="button" class="knop licht" onclick="toonAfwijzen({{ a.id }})">Afwijzen</button>
@@ -105,6 +106,47 @@
       <textarea name="tekst" rows="2" placeholder="Bijv.: Offerte X is te duur, focus op partijen die in week 45 kunnen." required></textarea>
     </label>
     <button class="knop">Sturen</button>
+  </form>
+</section>
+
+<section id="bestanden">
+  <h2>Bestanden <span class="stil">({{ documenten|length }})</span></h2>
+  {% if documenten %}
+  <div class="kaart">
+    <ul class="documenten">
+    {% for d in documenten %}
+      <li>
+        <div>
+          <a href="/bestand/bijlage/{{ d.bestand }}" target="_blank">📄 {{ d.naam }}</a>
+          <span class="stil">{{ (d.grootte / 1024)|round|int }} kB · {{ d.created_at|lokaal }}</span>
+          {% if d.omschrijving %}<br><span class="stil">{{ d.omschrijving }}</span>{% endif %}
+        </div>
+        <div class="knoppen">
+          <form method="post" action="/opdracht/{{ o.id }}/bestand/{{ d.id }}/meesturen" class="inline">
+            <label class="vinkje"><input type="checkbox" name="mag_mee" value="1" {{ 'checked' if d.mag_mee }} onchange="this.form.submit()"> mag mee in mails</label>
+          </form>
+          <form method="post" action="/opdracht/{{ o.id }}/bestand/{{ d.id }}/verwijderen" class="inline" onsubmit="return confirm('{{ d.naam }} verwijderen?')">
+            <button class="knop licht klein">Verwijderen</button>
+          </form>
+        </div>
+      </li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  <form method="post" action="/opdracht/{{ o.id }}/bestanden" enctype="multipart/form-data" class="kaart">
+    <label>Bestand(en) toevoegen
+      <input type="file" name="bestanden" multiple required>
+    </label>
+    <label>Omschrijving <span class="stil">(optioneel)</span>
+      <input name="omschrijving" placeholder="Bijv.: tekening vergunningsaanvraag voorzijde">
+    </label>
+    <label class="vinkje"><input type="checkbox" name="mag_mee" value="1"> De assistent mag dit als bijlage naar bedrijven sturen</label>
+    <p class="stil">Zonder vinkje leest de assistent het alleen zelf (bijvoorbeeld om maten over te nemen). Let op naam, adres of handtekening in het bestand.</p>
+    <label>Bericht aan de assistent <span class="stil">(optioneel)</span>
+      <textarea name="bericht" rows="2" placeholder="Bijv.: Stuur deze tekening mee naar de partijen die een offerte maken."></textarea>
+    </label>
+    <button class="knop">Uploaden</button>
   </form>
 </section>
 

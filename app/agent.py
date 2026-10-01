@@ -15,6 +15,7 @@ logger = logging.getLogger("opdracht")
 
 MAX_STAPPEN = 30
 MAX_BERICHTEN_PER_PARTIJ_PER_RONDE = 2
+MAX_BIJLAGEN_BYTES = 20_000_000
 DAGEN = ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"]
 PARTIJ_STATUSSEN = ["gevonden", "benaderd", "in_gesprek", "offerte_ontvangen",
                     "geen_reactie", "afgevallen", "favoriet"]
@@ -68,8 +69,15 @@ EIGEN_TOOLS = [
           "kantoortijden de deur uit.",
           {"partij_id": I, "onderwerp": S,
            "tekst": {**S, "description": "Volledige mailtekst inclusief aanhef en ondertekening."},
-           "antwoord_op_bericht_id": {**I, "description": "Id van het ontvangen bericht waarop je reageert (voor de mailthread)."}},
+           "antwoord_op_bericht_id": {**I, "description": "Id van het ontvangen bericht waarop je reageert (voor de mailthread)."},
+           "bijlagen": {"type": "array", "items": I,
+                        "description": "Id's van bestanden van de opdrachtgever die als bijlage mee moeten. "
+                                       "Alleen bestanden die mee mogen."}},
           ["partij_id", "onderwerp", "tekst"]),
+    _tool("bestand_bekijken",
+          "Lees een bestand dat de opdrachtgever bij de opdracht heeft gezet (PDF, afbeelding "
+          "of tekst), bijvoorbeeld om maten uit een tekening te halen.",
+          {"bestand_id": I}, ["bestand_id"]),
     _tool("formulier_invullen",
           "Vul een contact-/offerteformulier van een partij in en verstuur het. Gebruik "
           "de selectors uit formulier_bekijken. Wacht eventueel eerst op goedkeuring.",
@@ -151,6 +159,8 @@ def bouw_context(opdracht_id: int, reden: str) -> tuple[list, list[int]]:
         logs = conn.execute(
             "SELECT * FROM logboek WHERE opdracht_id = ? AND soort = 'ronde' "
             "ORDER BY id DESC LIMIT 5", (opdracht_id,)).fetchall()
+        documenten = conn.execute(
+            "SELECT * FROM documenten WHERE opdracht_id = ? ORDER BY id", (opdracht_id,)).fetchall()
 
     nu = datetime.now(config.TZ)
     afzender = config.opdracht_email()
@@ -217,12 +227,23 @@ def bouw_context(opdracht_id: int, reden: str) -> tuple[list, list[int]]:
     if not eigenaar:
         delen.append("(geen)")
 
+    delen += ["", "# Bestanden van de opdrachtgever (lezen met bestand_bekijken)"]
+    for d in documenten:
+        label = "[NIEUW, inhoud hierboven] " if not d["gezien"] else ""
+        mee = "mag als bijlage mee in mails" if d["mag_mee"] else "NIET meesturen, alleen voor jou"
+        delen.append(f"- {label}[bestand {d['id']}] {d['naam']} ({d['grootte'] // 1024} kB, {mee})"
+                     + (f": {d['omschrijving']}" if d["omschrijving"] else ""))
+    if not documenten:
+        delen.append("(geen)")
+
     open_acties = [a for a in acties if a["status"] in ("wacht", "goedgekeurd") and a["soort"] != "vraag"]
     delen += ["", "# Uitgaand, nog niet verstuurd (niet opnieuw aanmaken)"]
     for a in open_acties:
         status = "wacht op goedkeuring" if a["status"] == "wacht" else "goedgekeurd, wordt verstuurd"
+        bijl = ", ".join(x["naam"] for x in db.bijlagen(a))
         delen.append(f"- actie {a['id']} {a['soort']} aan {a['partij_naam'] or a['aan']}: "
-                     f"'{a['onderwerp'] or _knip(a['tekst'], 80)}' ({status})")
+                     f"'{a['onderwerp'] or _knip(a['tekst'], 80)}' ({status})"
+                     + (f" met bijlagen: {bijl}" if bijl else ""))
     if not open_acties:
         delen.append("(geen)")
     misluk = [a for a in acties if a["status"] in ("afgewezen", "mislukt", "handmatig")][-8:]
@@ -251,37 +272,51 @@ def bouw_context(opdracht_id: int, reden: str) -> tuple[list, list[int]]:
 
     delen += ["", "Bepaal nu wat er in deze ronde moet gebeuren en voer het uit."]
 
-    blokken = _bijlage_blokken([b for b in berichten if b["id"] in nieuwe_ids])
+    blokken = _bijlage_blokken([b for b in berichten if b["id"] in nieuwe_ids],
+                               [d for d in documenten if not d["gezien"]])
     blokken.append({"type": "text", "text": "\n".join(delen)})
     return blokken, nieuwe_ids
 
 
-def _bijlage_blokken(berichten) -> list:
-    """PDF's en afbeeldingen uit nieuwe mails (offertes!) direct meesturen."""
+def _bijlage_blokken(berichten, documenten=()) -> list:
+    """PDF's en afbeeldingen uit nieuwe mails (offertes!) en nieuwe bestanden
+    van de opdrachtgever direct meesturen."""
+    bestanden = [(bijl, f"bij bericht {b['id']}") for b in berichten for bijl in db.bijlagen(b)]
+    bestanden += [(d, f"bestand {d['id']} van de opdrachtgever") for d in documenten]
     blokken, aantal = [], 0
-    for b in berichten:
-        for bijl in db.bijlagen(b):
-            if aantal >= 4:
-                return blokken
-            pad = config.BIJLAGEN_DIR / bijl["bestand"]
-            if not pad.exists():
-                continue
-            data = pad.read_bytes()
-            typ = bijl["type"].lower()
-            if bijl["naam"].lower().endswith(".pdf"):
-                typ = "application/pdf"
-            if typ == "application/pdf" and len(data) < 15_000_000:
-                blokken.append({"type": "document", "title": f"{bijl['naam']} (bij bericht {b['id']})",
-                                "source": {"type": "base64", "media_type": "application/pdf",
-                                           "data": base64.standard_b64encode(data).decode()}})
-                aantal += 1
-            elif typ in ("image/jpeg", "image/png", "image/gif", "image/webp") and len(data) < 4_000_000:
-                blokken.append({"type": "image", "source": {
-                    "type": "base64", "media_type": typ,
-                    "data": base64.standard_b64encode(data).decode()}})
-                blokken.append({"type": "text", "text": f"(afbeelding hierboven: {bijl['naam']} bij bericht {b['id']})"})
-                aantal += 1
+    for bijl, herkomst in bestanden:
+        if aantal >= 4:
+            break
+        extra = inhoud_blokken(bijl, herkomst)
+        if extra:
+            blokken += extra
+            aantal += 1
     return blokken
+
+
+def inhoud_blokken(bijl, herkomst: str) -> list:
+    """Een opgeslagen bestand als content-blokken voor Claude (PDF, afbeelding
+    of platte tekst). Leeg als het type niet leesbaar is of te groot."""
+    pad = config.BIJLAGEN_DIR / bijl["bestand"]
+    if not pad.exists():
+        return []
+    data = pad.read_bytes()
+    typ = (bijl["type"] or "").lower()
+    naam = bijl["naam"]
+    if naam.lower().endswith(".pdf"):
+        typ = "application/pdf"
+    if typ == "application/pdf" and len(data) < 15_000_000:
+        return [{"type": "document", "title": f"{naam} ({herkomst})",
+                 "source": {"type": "base64", "media_type": "application/pdf",
+                            "data": base64.standard_b64encode(data).decode()}}]
+    if typ in ("image/jpeg", "image/png", "image/gif", "image/webp") and len(data) < 4_000_000:
+        return [{"type": "image", "source": {"type": "base64", "media_type": typ,
+                                             "data": base64.standard_b64encode(data).decode()}},
+                {"type": "text", "text": f"(afbeelding hierboven: {naam}, {herkomst})"}]
+    if typ.startswith("text/") or naam.lower().endswith((".txt", ".csv", ".md")):
+        return [{"type": "text", "text": f"Inhoud van {naam} ({herkomst}):\n"
+                                         + _knip(data.decode("utf-8", errors="replace"), 30000)}]
+    return []
 
 
 # ------------------------------------------------------------------ tools
@@ -374,7 +409,23 @@ class Ronde:
             raise ToolFout(f"Daglimiet van {max_dag} uitgaande berichten voor deze opdracht bereikt; "
                            "wacht tot een volgende ronde.")
 
-    def t_mail_sturen(self, partij_id, onderwerp, tekst, antwoord_op_bericht_id=None):
+    def _document(self, conn, document_id):
+        d = conn.execute("SELECT * FROM documenten WHERE id = ? AND opdracht_id = ?",
+                         (document_id, self.opdracht_id)).fetchone()
+        if d is None:
+            raise ToolFout(f"Bestand {document_id} hoort niet bij deze opdracht.")
+        return d
+
+    def t_bestand_bekijken(self, bestand_id):
+        with db.get_db() as conn:
+            d = self._document(conn, bestand_id)
+        blokken = inhoud_blokken(d, f"bestand {d['id']} van de opdrachtgever")
+        if not blokken:
+            return (f"De inhoud van {d['naam']} ({d['type'] or 'onbekend type'}) kan ik niet lezen; "
+                    "alleen PDF, afbeeldingen en tekst. Je kunt het wel als bijlage meesturen als dat mag.")
+        return blokken
+
+    def t_mail_sturen(self, partij_id, onderwerp, tekst, antwoord_op_bericht_id=None, bijlagen=None):
         with db.get_db() as conn:
             p = self._partij(conn, partij_id)
             aan = (p["email"] or "").strip().lower()
@@ -383,6 +434,16 @@ class Ronde:
                                "partij_bijwerken, of gebruik het formulier.")
             if aan in config.eigenaar_emails() or aan == config.opdracht_email().lower():
                 raise ToolFout("Dit adres mag niet als partij gemaild worden.")
+            meesturen = []
+            for document_id in dict.fromkeys(bijlagen or []):
+                d = self._document(conn, document_id)
+                if not d["mag_mee"]:
+                    raise ToolFout(f"Bestand {d['id']} ({d['naam']}) mag niet mee naar partijen. Vraag de "
+                                   "opdrachtgever het op de site vrij te geven als het toch nodig is.")
+                meesturen.append({"naam": d["naam"], "type": d["type"], "bestand": d["bestand"],
+                                  "grootte": d["grootte"]})
+            if sum(b["grootte"] for b in meesturen) > MAX_BIJLAGEN_BYTES:
+                raise ToolFout("De bijlagen zijn samen te groot voor één mail (max 20 MB).")
             self._check_limieten(conn, partij_id)
             if antwoord_op_bericht_id:
                 b = conn.execute("SELECT id FROM berichten WHERE id = ? AND opdracht_id = ? AND richting = 'in'",
@@ -391,10 +452,10 @@ class Ronde:
                     antwoord_op_bericht_id = None
             wacht = self._moet_goedkeuren(conn, partij_id)
             conn.execute(
-                "INSERT INTO acties (opdracht_id, partij_id, soort, status, aan, onderwerp, tekst, antwoord_op) "
-                "VALUES (?, ?, 'mail', ?, ?, ?, ?, ?)",
+                "INSERT INTO acties (opdracht_id, partij_id, soort, status, aan, onderwerp, tekst, antwoord_op, "
+                "bijlagen) VALUES (?, ?, 'mail', ?, ?, ?, ?, ?, ?)",
                 (self.opdracht_id, partij_id, "wacht" if wacht else "goedgekeurd", aan, onderwerp,
-                 tekst, antwoord_op_bericht_id))
+                 tekst, antwoord_op_bericht_id, mailer.dump_bijlagen(meesturen)))
         self.berichten_per_partij[partij_id] = self.berichten_per_partij.get(partij_id, 0) + 1
         if wacht:
             self.nieuw_wacht += 1
@@ -497,6 +558,7 @@ def draai_ronde(opdracht_id: int, reden: str) -> str:
 
 def _draai(opdracht_id: int, reden: str) -> str:
     ronde = Ronde(opdracht_id)
+    nieuwe_docs = [d["id"] for d in db.documenten(opdracht_id) if not d["gezien"]]
     blokken, nieuwe_ids = bouw_context(opdracht_id, reden)
     messages = [{"role": "user", "content": blokken}]
     totaal = {"tokens_in": 0, "tokens_uit": 0, "zoekopdrachten": 0, "usd": 0.0}
@@ -536,16 +598,20 @@ def _draai(opdracht_id: int, reden: str) -> str:
         samenvatting = (samenvatting + "\n" if samenvatting else "") + \
             f"(Ronde gestopt na {MAX_STAPPEN} stappen; wordt later voortgezet.)"
 
-    _na_ronde(ronde, nieuwe_ids, samenvatting, totaal)
+    _na_ronde(ronde, nieuwe_ids, samenvatting, totaal, nieuwe_docs)
     return samenvatting
 
 
-def _na_ronde(ronde: Ronde, nieuwe_ids: list[int], samenvatting: str, totaal: dict):
+def _na_ronde(ronde: Ronde, nieuwe_ids: list[int], samenvatting: str, totaal: dict,
+              nieuwe_docs: list[int] = ()):
     oid = ronde.opdracht_id
     with db.get_db() as conn:
         if nieuwe_ids:
             conn.execute(f"UPDATE berichten SET verwerkt = 1 WHERE id IN ({','.join('?' * len(nieuwe_ids))})",
                          nieuwe_ids)
+        if nieuwe_docs:
+            conn.execute(f"UPDATE documenten SET gezien = 1 WHERE id IN ({','.join('?' * len(nieuwe_docs))})",
+                         list(nieuwe_docs))
         conn.execute(
             "UPDATE opdrachten SET laatste_ronde_at = datetime('now'), tokens_in = tokens_in + ?, "
             "tokens_uit = tokens_uit + ?, zoekopdrachten = zoekopdrachten + ?, kosten_usd = kosten_usd + ?, "

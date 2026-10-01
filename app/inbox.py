@@ -199,8 +199,10 @@ def _verstuur_mail(a) -> str:
                              (a["antwoord_op"],)).fetchone()
         if b and b["message_id"]:
             in_reply_to, references = b["message_id"], b["references_hdr"]
+    bijlagen = db.bijlagen(a)
     try:
-        message_id = mailer.verstuur(a["aan"], a["onderwerp"], a["tekst"], in_reply_to, references)
+        message_id = mailer.verstuur(a["aan"], a["onderwerp"], a["tekst"], in_reply_to, references,
+                                     bijlagen=bijlagen)
     except mailer.MailFout as e:
         _zet(a["id"], "mislukt", str(e))
         db.log(a["opdracht_id"], f"Mail aan {a['aan']} mislukt: {e}", "fout")
@@ -208,9 +210,10 @@ def _verstuur_mail(a) -> str:
     with db.get_db() as conn:
         conn.execute(
             "INSERT INTO berichten (opdracht_id, partij_id, richting, soort, van, aan, onderwerp, tekst, "
-            "message_id, in_reply_to, references_hdr, verwerkt) VALUES (?, ?, 'uit', 'mail', ?, ?, ?, ?, ?, ?, ?, 1)",
+            "message_id, in_reply_to, references_hdr, bijlagen, verwerkt) "
+            "VALUES (?, ?, 'uit', 'mail', ?, ?, ?, ?, ?, ?, ?, ?, 1)",
             (a["opdracht_id"], a["partij_id"], config.opdracht_email(), a["aan"], a["onderwerp"],
-             a["tekst"], message_id, in_reply_to, references))
+             a["tekst"], message_id, in_reply_to, references, mailer.dump_bijlagen(bijlagen)))
         conn.execute("UPDATE partijen SET status = 'benaderd', updated_at = datetime('now') "
                      "WHERE id = ? AND status = 'gevonden'", (a["partij_id"],))
     _zet(a["id"], "verstuurd", "")

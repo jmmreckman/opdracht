@@ -88,12 +88,28 @@ CREATE TABLE IF NOT EXISTS acties (
     onderwerp TEXT NOT NULL DEFAULT '',
     tekst TEXT NOT NULL DEFAULT '',
     antwoord_op INTEGER REFERENCES berichten(id) ON DELETE SET NULL,
+    bijlagen TEXT NOT NULL DEFAULT '[]',
     formulier TEXT NOT NULL DEFAULT '',
     antwoord TEXT NOT NULL DEFAULT '',
     resultaat TEXT NOT NULL DEFAULT '',
     screenshot TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     uitgevoerd_at TEXT
+);
+
+-- Bestanden die de opdrachtgever bij een opdracht zet (tekening, vergunning,
+-- foto's). De assistent kan ze lezen en, als het mag, meesturen in mails.
+CREATE TABLE IF NOT EXISTS documenten (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    opdracht_id INTEGER NOT NULL REFERENCES opdrachten(id) ON DELETE CASCADE,
+    naam TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT '',
+    bestand TEXT NOT NULL,
+    grootte INTEGER NOT NULL DEFAULT 0,
+    omschrijving TEXT NOT NULL DEFAULT '',
+    mag_mee INTEGER NOT NULL DEFAULT 0,
+    gezien INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS logboek (
@@ -147,6 +163,10 @@ def init_db():
     config.SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     with get_db() as db:
         db.executescript(SCHEMA)
+        # Kolommen die later zijn bijgekomen, voor bestaande databases.
+        kolommen = {r["name"] for r in db.execute("PRAGMA table_info(acties)")}
+        if "bijlagen" not in kolommen:
+            db.execute("ALTER TABLE acties ADD COLUMN bijlagen TEXT NOT NULL DEFAULT '[]'")
         # Een ronde die bezig was toen de container herstartte, is nooit afgemaakt.
         db.execute("UPDATE opdrachten SET ronde_bezig = 0")
 
@@ -182,6 +202,12 @@ def log(opdracht_id: int | None, tekst: str, soort: str = "info") -> None:
 def opdracht(opdracht_id: int) -> sqlite3.Row | None:
     with get_db() as db:
         return db.execute("SELECT * FROM opdrachten WHERE id = ?", (opdracht_id,)).fetchone()
+
+
+def documenten(opdracht_id: int) -> list[sqlite3.Row]:
+    with get_db() as db:
+        return db.execute("SELECT * FROM documenten WHERE opdracht_id = ? ORDER BY id",
+                          (opdracht_id,)).fetchall()
 
 
 def bijlagen(row) -> list[dict]:

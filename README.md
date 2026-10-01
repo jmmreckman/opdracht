@@ -33,6 +33,10 @@ tot €1000") kan hij ook, maar daarvoor is de Claude-app zelf meestal net zo ha
 - **Formulieren** worden ingevuld met een echte browser (Chromium). Bij een captcha
   krijg je een mail met de in te vullen tekst en klik je daarna op *Zelf verstuurd*.
 - **Offertes als PDF** in een reactie worden direct door de assistent gelezen.
+- **Bestanden per opdracht** (tekening, vergunning, foto's) zet je onder *Bestanden* op
+  de opdrachtpagina. De assistent leest ze (PDF, afbeelding, tekst) en haalt er
+  bijvoorbeeld maten uit. Als bijlage meesturen in mails kan alleen bij bestanden met
+  het vinkje *mag mee in mails*; dat zet je per bestand aan of uit.
 - **Mails naar jou**: vragen en goedkeuringen direct, een dagelijkse samenvatting om
   18:30, en het eindrapport. Antwoord gewoon op zo'n mail: het `[OPD-nr]` in het
   onderwerp koppelt je antwoord aan de opdracht.

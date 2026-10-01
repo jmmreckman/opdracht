@@ -9,13 +9,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import markdown as md
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from . import config, db, inbox, intake, scheduler
+from . import config, db, inbox, intake, mailer, scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -236,6 +236,7 @@ def opdracht_pagina(request: Request, opdracht_id: int):
         "wachtrij": [a for a in acties if a["status"] == "goedgekeurd"],
         "verzendvenster": inbox.binnen_verzendvenster(),
         "bijlagen": db.bijlagen,
+        "documenten": db.documenten(opdracht_id),
     })
 
 
@@ -300,6 +301,67 @@ def opdracht_bericht(opdracht_id: int, tekst: str = Form(...)):
     if tekst.strip():
         inbox.bericht_van_eigenaar(opdracht_id, tekst.strip())
     return RedirectResponse(f"/opdracht/{opdracht_id}", status_code=303)
+
+
+MAX_UPLOAD_BYTES = 25_000_000
+
+
+@app.post("/opdracht/{opdracht_id}/bestanden")
+async def bestanden_uploaden(opdracht_id: int, bestanden: list[UploadFile] = File(...),
+                             omschrijving: str = Form(""), mag_mee: str = Form(""),
+                             bericht: str = Form("")):
+    _laad_opdracht(opdracht_id)
+    namen = []
+    for f in bestanden:
+        inhoud = await f.read()
+        if not f.filename or not inhoud:
+            continue
+        if len(inhoud) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"{f.filename} is groter dan 25 MB")
+        b = mailer.bewaar_bijlage(f.filename, f.content_type or "application/octet-stream", inhoud)
+        with db.get_db() as conn:
+            conn.execute(
+                "INSERT INTO documenten (opdracht_id, naam, type, bestand, grootte, omschrijving, mag_mee) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (opdracht_id, b["naam"], b["type"], b["bestand"], b["grootte"], omschrijving.strip(),
+                 1 if mag_mee else 0))
+        namen.append(b["naam"])
+    if namen:
+        db.log(opdracht_id, f"Bestand(en) toegevoegd door opdrachtgever: {', '.join(namen)}.")
+        if bericht.strip():
+            inbox.bericht_van_eigenaar(opdracht_id, bericht.strip())
+    return RedirectResponse(f"/opdracht/{opdracht_id}#bestanden", status_code=303)
+
+
+def _laad_document(opdracht_id: int, document_id: int):
+    with db.get_db() as conn:
+        d = conn.execute("SELECT * FROM documenten WHERE id = ? AND opdracht_id = ?",
+                         (document_id, opdracht_id)).fetchone()
+    if d is None:
+        raise HTTPException(404)
+    return d
+
+
+@app.post("/opdracht/{opdracht_id}/bestand/{document_id}/meesturen")
+def bestand_meesturen(opdracht_id: int, document_id: int, mag_mee: str = Form("")):
+    _laad_document(opdracht_id, document_id)
+    with db.get_db() as conn:
+        conn.execute("UPDATE documenten SET mag_mee = ? WHERE id = ?", (1 if mag_mee else 0, document_id))
+    return RedirectResponse(f"/opdracht/{opdracht_id}#bestanden", status_code=303)
+
+
+@app.post("/opdracht/{opdracht_id}/bestand/{document_id}/verwijderen")
+def bestand_verwijderen(opdracht_id: int, document_id: int):
+    d = _laad_document(opdracht_id, document_id)
+    with db.get_db() as conn:
+        conn.execute("DELETE FROM documenten WHERE id = ?", (document_id,))
+        # Het bestand blijft staan als een (al verstuurde of klaargezette) mail het nog gebruikt.
+        in_gebruik = conn.execute(
+            "SELECT 1 FROM acties WHERE bijlagen LIKE ? UNION SELECT 1 FROM berichten WHERE bijlagen LIKE ?",
+            (f'%"{d["bestand"]}"%', f'%"{d["bestand"]}"%')).fetchone()
+    if not in_gebruik:
+        (config.BIJLAGEN_DIR / d["bestand"]).unlink(missing_ok=True)
+    return RedirectResponse(f"/opdracht/{opdracht_id}#bestanden", status_code=303)
 
 
 @app.post("/opdracht/{opdracht_id}/verwijderen")
@@ -501,12 +563,17 @@ def api_opdracht(request: Request, opdracht_id: int, alles: bool = False):
             "SELECT id, partij_id, richting, soort, van, aan, onderwerp, tekst, automatisch, bijlagen, datum "
             "FROM berichten WHERE opdracht_id = ? ORDER BY datum, id", (opdracht_id,)).fetchall() if alles else []
         acties = conn.execute(
-            "SELECT id, partij_id, soort, status, aan, onderwerp, tekst, antwoord, resultaat, created_at, "
-            "uitgevoerd_at FROM acties WHERE opdracht_id = ? ORDER BY id", (opdracht_id,)).fetchall() if alles else []
+            "SELECT id, partij_id, soort, status, aan, onderwerp, tekst, antwoord, resultaat, bijlagen, "
+            "created_at, uitgevoerd_at FROM acties WHERE opdracht_id = ? ORDER BY id",
+            (opdracht_id,)).fetchall() if alles else []
     uit = {k: o[k] for k in ("id", "titel", "type", "status", "brief", "criteria", "deelbaar", "deadline",
                               "autonomie", "notities", "rapport", "rapport_definitief", "kosten_usd")}
     uit.update({"partijen": [dict(p) for p in partijen], "logboek": [dict(lg) for lg in logboek],
-                "wacht_op_jou": [dict(a) for a in open_]})
+                "wacht_op_jou": [dict(a) for a in open_],
+                "documenten": [{k: d[k] for k in ("id", "naam", "type", "grootte", "omschrijving", "mag_mee",
+                                                  "created_at")}
+                               | {"url": f"{config.site_url()}/api/extern/bijlage/{d['bestand']}"}
+                               for d in db.documenten(opdracht_id)]})
     if alles:
         uit["berichten"] = []
         for b in berichten:
@@ -514,7 +581,7 @@ def api_opdracht(request: Request, opdracht_id: int, alles: bool = False):
             d["bijlagen"] = [{**x, "url": f"{config.site_url()}/api/extern/bijlage/{x['bestand']}"}
                              for x in db.bijlagen(b)]
             uit["berichten"].append(d)
-        uit["acties"] = [dict(a) for a in acties]
+        uit["acties"] = [{**dict(a), "bijlagen": db.bijlagen(a)} for a in acties]
     return uit
 
 

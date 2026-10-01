@@ -57,7 +57,9 @@ def _domein(adres: str) -> str:
 
 
 def bouw_mail(aan: str, onderwerp: str, tekst: str, in_reply_to: str = "",
-              references: str = "", van_naam: str | None = None) -> EmailMessage:
+              references: str = "", van_naam: str | None = None,
+              bijlagen: list[dict] | None = None) -> EmailMessage:
+    """`bijlagen`: dicts met naam, type en bestand (in BIJLAGEN_DIR)."""
     afzender = config.opdracht_email()
     if not afzender:
         raise MailFout("OPDRACHT_EMAIL/SMTP_USER is niet ingesteld")
@@ -72,14 +74,22 @@ def bouw_mail(aan: str, onderwerp: str, tekst: str, in_reply_to: str = "",
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = (references + " " + in_reply_to).strip()
     msg.set_content(tekst)
+    for b in bijlagen or []:
+        pad = config.BIJLAGEN_DIR / b["bestand"]
+        if not pad.exists():
+            raise MailFout(f"Bijlage {b['naam']} bestaat niet meer")
+        hoofd, _, sub = (b.get("type") or "application/octet-stream").partition("/")
+        msg.add_attachment(pad.read_bytes(), maintype=hoofd, subtype=sub or "octet-stream",
+                           filename=b["naam"])
     return msg
 
 
 def verstuur(aan: str, onderwerp: str, tekst: str, in_reply_to: str = "",
-             references: str = "", van_naam: str | None = None) -> str:
+             references: str = "", van_naam: str | None = None,
+             bijlagen: list[dict] | None = None) -> str:
     """Verstuurt een mail en geeft het Message-ID terug. Gooit MailFout bij
     problemen - de aanroeper beslist wat er dan moet gebeuren."""
-    msg = bouw_mail(aan, onderwerp, tekst, in_reply_to, references, van_naam)
+    msg = bouw_mail(aan, onderwerp, tekst, in_reply_to, references, van_naam, bijlagen)
     try:
         _smtp_verstuur(msg)
     except MailFout:
@@ -216,7 +226,7 @@ def parse_mail(ruw: bytes) -> dict:
         if bestandsnaam or "attachment" in disp:
             inhoud = deel.get_payload(decode=True) or b""
             if inhoud:
-                bijlagen.append(_bewaar_bijlage(bestandsnaam or "bijlage", ctype, inhoud))
+                bijlagen.append(bewaar_bijlage(bestandsnaam or "bijlage", ctype, inhoud))
             continue
         if ctype == "text/plain" and not tekst_plain:
             tekst_plain = _payload_tekst(deel)
@@ -261,7 +271,7 @@ def _payload_tekst(deel) -> str:
         return inhoud.decode("utf-8", errors="replace")
 
 
-def _bewaar_bijlage(naam: str, ctype: str, inhoud: bytes) -> dict:
+def bewaar_bijlage(naam: str, ctype: str, inhoud: bytes) -> dict:
     veilig = re.sub(r"[^A-Za-z0-9._-]+", "_", naam)[-80:] or "bijlage"
     bestand = f"{uuid.uuid4().hex[:12]}_{veilig}"
     config.BIJLAGEN_DIR.mkdir(parents=True, exist_ok=True)
